@@ -71,13 +71,33 @@ pip install -r requirements.txt
 
 ### 2. Download datasets
 
+**RDD2022**
+
 ```bash
 python data/download_rdd2022.py
+```
+
+Downloads as a single ~13.3 GB archive from Figshare and extracts the four
+country splits (Japan, India, Czech, Norway). Resumes automatically if interrupted.
+
+**MVTec AD**
+
+The official MVTec download URL is no longer available. The dataset is downloaded
+from Kaggle instead. One-time setup:
+
+1. Create a free account at https://www.kaggle.com
+2. Go to Account -> API -> Create New Token. This downloads `kaggle.json`.
+3. Place `kaggle.json` at `~/.kaggle/kaggle.json`. On Linux/Mac run `chmod 600`.
+4. Accept the dataset terms at https://www.kaggle.com/datasets/ipythonx/mvtec-ad
+
+Then run:
+
+```bash
+pip install kaggle
 python data/download_mvtec.py
 ```
 
-RDD2022 downloads four country splits (Japan, India, Czech, Norway) from GitHub.
-MVTec AD is about 5 GB and downloads from mvtec.com.
+About 5 GB, 15 categories.
 
 ### 3. Train EfficientNet-B4 on RDD2022
 
