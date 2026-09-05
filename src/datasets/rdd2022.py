@@ -34,6 +34,11 @@ LABEL_MAP: dict[str, int] = {
 }
 
 
+def _parse_coordinate(value: str) -> int:
+    """Parse an XML coordinate, which may be integer or decimal text."""
+    return int(round(float(value)))
+
+
 def parse_annotation(xml_path: str) -> list[dict]:
     """
     Parse a Pascal VOC XML file and return a list of bounding box records.
@@ -58,10 +63,10 @@ def parse_annotation(xml_path: str) -> list[dict]:
         bndbox = obj.find("bndbox")
         boxes.append({
             "label": LABEL_MAP[name],
-            "xmin": int(bndbox.find("xmin").text),
-            "ymin": int(bndbox.find("ymin").text),
-            "xmax": int(bndbox.find("xmax").text),
-            "ymax": int(bndbox.find("ymax").text),
+            "xmin": _parse_coordinate(bndbox.find("xmin").text),
+            "ymin": _parse_coordinate(bndbox.find("ymin").text),
+            "xmax": _parse_coordinate(bndbox.find("xmax").text),
+            "ymax": _parse_coordinate(bndbox.find("ymax").text),
         })
     return boxes
 

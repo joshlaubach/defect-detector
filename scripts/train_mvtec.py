@@ -22,10 +22,10 @@ from config import (
     set_seeds, SEED,
     EFFICIENTNET_LR,
     EFFICIENTNET_WEIGHT_DECAY,
-    EFFICIENTNET_BATCH_SIZE,
-    EFFICIENTNET_EPOCHS,
     EFFICIENTNET_IMG_SIZE,
-    EFFICIENTNET_NUM_WORKERS,
+    MVTEC_BATCH_SIZE,
+    MVTEC_EPOCHS,
+    MVTEC_NUM_WORKERS,
     MVTEC_NUM_CLASSES,
     MVTEC_DIR,
     MVTEC_CHECKPOINT,
@@ -131,16 +131,16 @@ def main() -> None:
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=EFFICIENTNET_BATCH_SIZE,
+        batch_size=MVTEC_BATCH_SIZE,
         shuffle=True,
-        num_workers=EFFICIENTNET_NUM_WORKERS,
+        num_workers=MVTEC_NUM_WORKERS,
         pin_memory=True,
     )
     test_loader = DataLoader(
         test_dataset,
-        batch_size=EFFICIENTNET_BATCH_SIZE,
+        batch_size=MVTEC_BATCH_SIZE,
         shuffle=False,
-        num_workers=EFFICIENTNET_NUM_WORKERS,
+        num_workers=MVTEC_NUM_WORKERS,
         pin_memory=True,
     )
 
@@ -158,20 +158,20 @@ def main() -> None:
     )
     scheduler = optim.lr_scheduler.StepLR(
         optimizer,
-        step_size=EFFICIENTNET_EPOCHS // 2,
+        step_size=max(1, MVTEC_EPOCHS // 2),
         gamma=0.1,
     )
 
     CHECKPOINT_DIR.mkdir(exist_ok=True)
     best_val_acc = 0.0
 
-    for epoch in range(1, EFFICIENTNET_EPOCHS + 1):
+    for epoch in range(1, MVTEC_EPOCHS + 1):
         train_loss, train_acc = train_one_epoch(model, train_loader, optimizer, criterion, device)
         val_loss, val_acc = evaluate(model, test_loader, criterion, device)
         scheduler.step()
 
         print(
-            f"Epoch {epoch:02d}/{EFFICIENTNET_EPOCHS}  "
+            f"Epoch {epoch:02d}/{MVTEC_EPOCHS}  "
             f"train_loss={train_loss:.4f}  train_acc={train_acc:.3f}  "
             f"val_loss={val_loss:.4f}  val_acc={val_acc:.3f}"
         )

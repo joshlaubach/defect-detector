@@ -45,12 +45,18 @@ EFFICIENTNET_MODEL = "efficientnet_b4"
 EFFICIENTNET_IMG_SIZE = 380
 EFFICIENTNET_LR = 1e-4
 EFFICIENTNET_WEIGHT_DECAY = 1e-2
-EFFICIENTNET_BATCH_SIZE = 32
-EFFICIENTNET_EPOCHS = 20
-EFFICIENTNET_NUM_WORKERS = 4
+EFFICIENTNET_BATCH_SIZE = 16
+EFFICIENTNET_EPOCHS = 50
+EFFICIENTNET_NUM_WORKERS = 2
 
 RDD2022_NUM_CLASSES = 5     # background + D00 + D10 + D20 + D40
 MVTEC_NUM_CLASSES = 2       # normal + anomalous
+
+# Kept separate from EFFICIENTNET_BATCH_SIZE/EPOCHS/NUM_WORKERS so retuning
+# the RDD2022 notebook run doesn't also retune scripts/train_mvtec.py.
+MVTEC_BATCH_SIZE = 32
+MVTEC_EPOCHS = 20
+MVTEC_NUM_WORKERS = 4
 
 
 # ---------------------------------------------------------------------------
