@@ -8,8 +8,11 @@ prints macro-averaged scores across all categories. AUROC is the standard
 evaluation metric for MVTec AD.
 
 Usage:
-    python scripts/evaluate_mvtec.py
+    python scripts/eval/evaluate_mvtec.py
 """
+
+import sys
+from pathlib import Path
 
 import torch
 import numpy as np
@@ -17,6 +20,8 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from sklearn.metrics import f1_score, roc_auc_score
 from tqdm import tqdm
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from config import (
     set_seeds, SEED,

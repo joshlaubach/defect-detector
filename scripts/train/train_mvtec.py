@@ -8,8 +8,11 @@ across all 15 MVTec categories combined, then evaluated on the test split.
 The best checkpoint is saved to checkpoints/efficientnet_mvtec.pth.
 
 Usage:
-    python scripts/train_mvtec.py
+    python scripts/train/train_mvtec.py
 """
+
+import sys
+from pathlib import Path
 
 import torch
 from torch import nn, optim
@@ -17,6 +20,8 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from sklearn.metrics import classification_report, roc_auc_score
 from tqdm import tqdm
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from config import (
     set_seeds, SEED,

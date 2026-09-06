@@ -21,6 +21,7 @@ Usage:
 """
 
 import argparse
+import sys
 from pathlib import Path
 from collections import defaultdict
 
@@ -28,6 +29,8 @@ import numpy as np
 import torch
 from PIL import Image
 from torchvision import transforms
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tqdm import tqdm
 
 from config import (
@@ -36,6 +39,7 @@ from config import (
     PATCH_SIZE,
     EFFICIENTNET_IMG_SIZE,
     RDD2022_NUM_CLASSES,
+    RDD2022_DEFECT_THRESHOLD,
     RDD2022_CHECKPOINT,
 )
 from src.models.efficientnet import load_checkpoint
@@ -93,12 +97,16 @@ def inspect_image(
 
     with torch.no_grad():
         logits = model(batch)
-        predictions = logits.argmax(dim=1).cpu().tolist()
+        triggered = (torch.sigmoid(logits) > RDD2022_DEFECT_THRESHOLD).cpu()
 
-    for patch_idx, pred_class in enumerate(predictions):
-        if pred_class != 0:
+    # A patch can trigger more than one defect class at once (e.g. a
+    # pothole next to a crack); count each one.
+    for patch_idx in range(triggered.shape[0]):
+        classes = torch.nonzero(triggered[patch_idx]).squeeze(1).tolist()
+        if classes:
             defect_indices.append(patch_idx)
-            class_counts[pred_class] += 1
+            for cls in classes:
+                class_counts[cls + 1] += 1
 
     annotated = highlight_patches(np_image, defect_indices, GRID_SIZE)
     return annotated, defect_indices, dict(class_counts)

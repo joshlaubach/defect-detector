@@ -229,6 +229,11 @@ def main() -> None:
         default="data/raw/rdd2022",
         help="Directory to save the extracted data",
     )
+    parser.add_argument(
+        "--keep-archive",
+        action="store_true",
+        help="Do not delete the downloaded ZIP after a successful extraction",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -274,13 +279,29 @@ def main() -> None:
         return
 
     if extraction_ok:
-        archive_path.unlink()
-        print(f"\nArchive removed. All requested countries downloaded to {out_dir}/")
+        _cleanup(out_dir, archive_path, keep_archive=args.keep_archive)
+        print(f"\nAll requested countries downloaded to {out_dir}/")
     else:
         print(
             f"\nSome countries failed to extract. "
             f"Archive kept at {archive_path} for retry."
         )
+
+
+def _cleanup(out_dir: Path, archive_path: Path, keep_archive: bool) -> None:
+    """Remove the archive and any stray staging leftovers from older runs."""
+    if archive_path.exists() and not keep_archive:
+        archive_path.unlink()
+        print("Removed archive ZIP.")
+
+    # Older versions of this script left the raw "RDD2022/" tree (and the
+    # per-country sub-archives) behind, which roughly triples disk usage.
+    stray = out_dir / ZIP_ROOT
+    if stray.is_dir():
+        shutil.rmtree(stray, ignore_errors=True)
+        print(f"Removed stray {stray}/ from a previous run.")
+    for leftover in out_dir.glob("_staging_*"):
+        shutil.rmtree(leftover, ignore_errors=True)
 
 
 if __name__ == "__main__":
