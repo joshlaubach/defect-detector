@@ -163,7 +163,7 @@ Scripts are now split by purpose:
 
 | Purpose | Location |
 |---------|----------|
-| One-time training | `notebooks/train_efficientnet.ipynb`, `scripts/train/train_mvtec.py`, `scripts/train/train_dqn.py` |
+| One-time training | `notebooks/training.ipynb`, `scripts/train/train_mvtec.py`, `scripts/train/train_dqn.py` |
 | Evaluation | `scripts/eval/evaluate_rdd2022.py`, `evaluate_mvtec.py`, `evaluate_dqn.py` |
 | Production | `scripts/run_inspection.py`, `src/pipeline.py`, `dashboard/app.py` |
 | Diagnostic | `scripts/waymo_test.py` (OOD spot-check, EfficientNet only) |
