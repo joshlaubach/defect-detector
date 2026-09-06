@@ -62,6 +62,14 @@ Post-drive frames
 
 Pick the track that matches what you want to do.
 
+Use Python 3.12 for the virtualenv. `requirements.txt` pulls torch/torchvision
+from the CUDA 12.8 wheel index, which is required for RTX 50-series (Blackwell)
+GPUs:
+
+```bash
+py -3.12 -m venv .venv        # Windows; use python3.12 on Linux/macOS
+```
+
 ### Track A: inference only (no datasets)
 
 You need the two checkpoints in `checkpoints/` and, for narrative text, a running Ollama.
