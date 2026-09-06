@@ -13,15 +13,20 @@ State:
     - A binary mask of length GRID_SIZE^2 marking which patches are inspected
 
 Action:
-    An integer in [0, GRID_SIZE^2) selecting the next patch to inspect.
+    An integer in [0, GRID_SIZE^2] . Values [0, GRID_SIZE^2) select the next
+    patch to inspect; the final value GRID_SIZE^2 is a "stop" action that
+    ends the episode early.
 
 Reward:
-    +DQN_DEFECT_REWARD  if the selected patch is classified as defective
-    +DQN_STEP_PENALTY   applied every step (negative, to penalize wasted steps)
+    +DQN_DEFECT_REWARD  if the selected patch has any defect above threshold
+    +DQN_STEP_PENALTY   applied on every inspect step (negative)
     Re-inspecting a patch gives only the step penalty (no double reward).
+    On "stop": DQN_STOP_BONUS * recall - DQN_MISS_PENALTY * missed_defects,
+    where recall is defects_found / defects_total for the current image.
 
 Episode end:
-    The episode ends when every patch has been inspected.
+    The episode ends when the agent picks "stop" or when every patch has
+    been inspected.
 """
 
 from pathlib import Path
@@ -38,8 +43,11 @@ from config import (
     GRID_SIZE,
     PATCH_SIZE,
     EFFICIENTNET_IMG_SIZE,
+    RDD2022_DEFECT_THRESHOLD,
     DQN_DEFECT_REWARD,
     DQN_STEP_PENALTY,
+    DQN_STOP_BONUS,
+    DQN_MISS_PENALTY,
 )
 from src.utils.patches import extract_patches, resize_patch
 
@@ -78,8 +86,9 @@ class PatchInspectionEnv(gymnasium.Env):
                      feature vector and to score individual patches.
         device:      Device the model lives on.
         grid_size:   Number of grid cells per axis (default from config).
-        background_class: Class index that means "no defect". Patches
-                     predicted as this class give no positive reward.
+        defect_threshold: Sigmoid cutoff above which a patch is considered
+                     to contain a defect. Patches with no class above this
+                     threshold give no positive reward.
     """
 
     metadata = {"render_modes": []}
@@ -90,7 +99,7 @@ class PatchInspectionEnv(gymnasium.Env):
         model: nn.Module,
         device: torch.device,
         grid_size: int = GRID_SIZE,
-        background_class: int = 0,
+        defect_threshold: float = RDD2022_DEFECT_THRESHOLD,
     ) -> None:
         super().__init__()
 
@@ -100,7 +109,10 @@ class PatchInspectionEnv(gymnasium.Env):
         self.device = device
         self.grid_size = grid_size
         self.n_patches = grid_size * grid_size
-        self.background_class = background_class
+        self.defect_threshold = defect_threshold
+
+        # Action n_patches is "stop"; patch actions are [0, n_patches).
+        self.stop_action = self.n_patches
 
         feature_dim = _get_feature_dim(model, device)
         obs_dim = feature_dim + self.n_patches
@@ -111,12 +123,40 @@ class PatchInspectionEnv(gymnasium.Env):
             shape=(obs_dim,),
             dtype=np.float32,
         )
-        self.action_space = gymnasium.spaces.Discrete(self.n_patches)
+        self.action_space = gymnasium.spaces.Discrete(self.n_patches + 1)
 
         # Episode state, populated in reset().
         self._image_features: np.ndarray = np.zeros(feature_dim, dtype=np.float32)
         self._inspected_mask: np.ndarray = np.zeros(self.n_patches, dtype=np.float32)
-        self._patches: list[np.ndarray] = []
+
+        # Pre-compute features and patch defect labels for all images so that
+        # DQN steps are array lookups rather than EfficientNet forward passes.
+        print("Pre-computing image features and patch labels (runs once) ...")
+        self._cached_features: list[np.ndarray] = []
+        self._cached_patch_labels: list[np.ndarray] = []
+        with torch.no_grad():
+            for img_path in self.image_paths:
+                pil_img = Image.open(img_path).convert("RGB")
+                np_img = np.array(pil_img)
+
+                # Full-image feature vector.
+                img_t = _FULL_IMAGE_TRANSFORM(pil_img).unsqueeze(0).to(device)
+                feats = model.forward_features(img_t)
+                if feats.dim() == 4:
+                    feats = feats.mean(dim=[2, 3])
+                self._cached_features.append(feats.squeeze(0).cpu().numpy())
+
+                # Per-patch defect labels.
+                patches = extract_patches(np_img, grid_size)
+                labels = np.zeros(self.n_patches, dtype=np.float32)
+                for i, patch in enumerate(patches):
+                    resized = resize_patch(patch, PATCH_SIZE)
+                    t = _NORMALIZE(Image.fromarray(resized)).unsqueeze(0).to(device)
+                    probs = torch.sigmoid(model(t))
+                    labels[i] = float((probs > defect_threshold).any().item())
+                self._cached_patch_labels.append(labels)
+        print(f"  Cached {len(self.image_paths)} images.")
+        self._current_idx: int = 0
 
     # ------------------------------------------------------------------
     # Gymnasium interface
@@ -129,46 +169,63 @@ class PatchInspectionEnv(gymnasium.Env):
     ) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
 
-        # Pick a random image for this episode.
-        idx = self.np_random.integers(0, len(self.image_paths))
-        img_path = self.image_paths[idx]
-
-        pil_image = Image.open(img_path).convert("RGB")
-        np_image = np.array(pil_image)
-
-        # Extract all patches up front so step() does not do file I/O.
-        self._patches = extract_patches(np_image, self.grid_size)
+        # Pick a random image for this episode using pre-cached data.
+        self._current_idx = int(self.np_random.integers(0, len(self.image_paths)))
+        self._image_features = self._cached_features[self._current_idx]
         self._inspected_mask = np.zeros(self.n_patches, dtype=np.float32)
-
-        # Compute the full-image feature vector (fixed for this episode).
-        image_tensor = _FULL_IMAGE_TRANSFORM(pil_image).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            features = self.model.forward_features(image_tensor)
-            if features.dim() == 4:
-                features = features.mean(dim=[2, 3])
-        self._image_features = features.squeeze(0).cpu().numpy()
+        self._defects_found = 0
+        self._defects_total = int(self._cached_patch_labels[self._current_idx].sum())
 
         return self._get_obs(), {}
 
     def step(
         self, action: int
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
-        reward = DQN_STEP_PENALTY
-
-        if self._inspected_mask[action] == 0.0:
-            self._inspected_mask[action] = 1.0
-            patch_class = self._classify_patch(action)
-            if patch_class != self.background_class:
-                reward += DQN_DEFECT_REWARD
-
-        # Episode ends when every patch has been visited.
-        terminated = bool(self._inspected_mask.sum() == self.n_patches)
         truncated = False
 
-        info: dict[str, Any] = {
+        # Stop action: end the episode and settle up on recall.
+        if action == self.stop_action:
+            reward = self._stop_reward()
+            terminated = True
+            return self._get_obs(), reward, terminated, truncated, self._info(stopped=True)
+
+        reward = DQN_STEP_PENALTY
+        if self._inspected_mask[action] == 0.0:
+            self._inspected_mask[action] = 1.0
+            if self._patch_has_defect(action):
+                reward += DQN_DEFECT_REWARD
+                self._defects_found += 1
+
+        # A full sweep also ends the episode (and pays the same terminal bonus,
+        # so "inspect everything" and "stop once done" are scored consistently).
+        if self._inspected_mask.sum() == self.n_patches:
+            reward += self._stop_reward()
+            terminated = True
+        else:
+            terminated = False
+
+        return self._get_obs(), reward, terminated, truncated, self._info(stopped=terminated)
+
+    def _stop_reward(self) -> float:
+        """Terminal reward: reward high recall, punish leaving defects behind."""
+        if self._defects_total == 0:
+            # Clean image: stopping promptly is the right call.
+            return DQN_STOP_BONUS
+        recall = self._defects_found / self._defects_total
+        missed = self._defects_total - self._defects_found
+        return DQN_STOP_BONUS * recall - DQN_MISS_PENALTY * missed
+
+    def _info(self, stopped: bool) -> dict[str, Any]:
+        return {
             "patches_inspected": int(self._inspected_mask.sum()),
+            "defects_found": self._defects_found,
+            "defects_total": self._defects_total,
+            "recall": (
+                self._defects_found / self._defects_total
+                if self._defects_total else 1.0
+            ),
+            "stopped": stopped,
         }
-        return self._get_obs(), reward, terminated, truncated, info
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -177,12 +234,6 @@ class PatchInspectionEnv(gymnasium.Env):
     def _get_obs(self) -> np.ndarray:
         return np.concatenate([self._image_features, self._inspected_mask])
 
-    def _classify_patch(self, patch_idx: int) -> int:
-        """Run EfficientNet on one patch and return the predicted class."""
-        patch = self._patches[patch_idx]
-        resized = resize_patch(patch, PATCH_SIZE)
-        pil_patch = Image.fromarray(resized)
-        tensor = _NORMALIZE(pil_patch).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            logits = self.model(tensor)
-        return int(logits.argmax(dim=1).item())
+    def _patch_has_defect(self, patch_idx: int) -> bool:
+        """Look up the pre-cached patch defect label (no EfficientNet call at step time)."""
+        return bool(self._cached_patch_labels[self._current_idx][patch_idx])

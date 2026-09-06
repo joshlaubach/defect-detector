@@ -20,17 +20,14 @@ import numpy as np
 import ollama
 from PIL import Image
 
-from config import LLAMA_MODEL, OLLAMA_HOST
+from config import LLAMA_MODEL, OLLAMA_HOST, SEED
+from src.models.report import CLASS_NAMES as _REPORT_CLASS_NAMES
 
 
-# Class index to human-readable name. Index 0 is excluded because we only
-# call LLaMA on patches that were flagged as defective.
+# Single source of truth for class names lives in report.py. LLaMA prompts
+# read better lowercase, so lowercase a copy here without duplicating the map.
 CLASS_NAMES: dict[int, str] = {
-    1: "pothole",
-    2: "longitudinal crack",
-    3: "transverse crack",
-    4: "alligator crack",
-    5: "surface anomaly",   # MVTec catch-all
+    idx: name.lower() for idx, name in _REPORT_CLASS_NAMES.items() if idx != 0
 }
 
 _PROMPT_TEMPLATE = """\
@@ -104,6 +101,10 @@ def generate_report(
                 "images": [image_bytes],
             }
         ],
+        # Greedy decoding with a fixed seed so the same patch produces the
+        # same report across runs. The Ollama runtime is still not bit-exact,
+        # but this removes sampling as a source of variation.
+        options={"seed": SEED, "temperature": 0.0},
     )
 
     return response["message"]["content"].strip()
@@ -117,8 +118,20 @@ def check_ollama_available() -> bool:
     """
     try:
         client = ollama.Client(host=OLLAMA_HOST)
-        models = client.list()
-        model_names = [m["name"] for m in models.get("models", [])]
-        return any(LLAMA_MODEL in name for name in model_names)
+        response = client.list()
+        # ollama<0.4 returns dicts with a "name" key; ollama>=0.4 returns
+        # objects with a .model attribute. Handle both so a client upgrade
+        # doesn't silently disable narrative reports.
+        entries = getattr(response, "models", None) or response.get("models", [])
+        names = []
+        for entry in entries:
+            name = (
+                getattr(entry, "model", None)
+                or getattr(entry, "name", None)
+                or (entry.get("model") or entry.get("name") if isinstance(entry, dict) else None)
+            )
+            if name:
+                names.append(name)
+        return any(LLAMA_MODEL in name for name in names)
     except Exception:
         return False

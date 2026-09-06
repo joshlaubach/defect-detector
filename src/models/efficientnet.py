@@ -14,16 +14,23 @@ import torch
 import timm
 from torch import nn
 
-from config import EFFICIENTNET_MODEL
+from config import EFFICIENTNET_MODEL, RDD2022_DEFECT_THRESHOLD
 
 
-def build_efficientnet(num_classes: int, pretrained: bool = True) -> nn.Module:
+def build_efficientnet(
+    num_classes: int,
+    pretrained: bool = True,
+    drop_rate: float = 0.0,
+    drop_path_rate: float = 0.0,
+) -> nn.Module:
     """
     Load EfficientNet-B4 and replace its classifier head.
 
     Args:
-        num_classes: Number of output classes.
-        pretrained:  If True, start from ImageNet weights. Set False for testing.
+        num_classes:    Number of output classes.
+        pretrained:     If True, start from ImageNet weights. Set False for testing.
+        drop_rate:      Dropout applied before the classifier head.
+        drop_path_rate: Stochastic depth rate applied across the backbone blocks.
 
     Returns:
         An nn.Module ready to move to a device and train.
@@ -32,8 +39,30 @@ def build_efficientnet(num_classes: int, pretrained: bool = True) -> nn.Module:
         EFFICIENTNET_MODEL,
         pretrained=pretrained,
         num_classes=num_classes,
+        drop_rate=drop_rate,
+        drop_path_rate=drop_path_rate,
     )
     return model
+
+
+def decode_multilabel(
+    logits: torch.Tensor, threshold: float = RDD2022_DEFECT_THRESHOLD
+) -> list[int]:
+    """
+    Turn raw multi-label logits for one sample into a list of triggered
+    defect classes.
+
+    Args:
+        logits:    Shape (num_classes,) or (1, num_classes) raw model output.
+        threshold: Sigmoid cutoff for "this defect is present".
+
+    Returns:
+        Sorted list of 1-indexed class labels (matching LABEL_MAP /
+        CLASS_NAMES) whose sigmoid probability exceeds threshold. Empty if
+        no defect was detected.
+    """
+    probs = torch.sigmoid(logits).squeeze()
+    return [i + 1 for i, p in enumerate(probs.tolist()) if p > threshold]
 
 
 def load_checkpoint(

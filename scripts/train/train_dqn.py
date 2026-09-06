@@ -13,13 +13,17 @@ update). Epsilon decays linearly from 1.0 to 0.05 over the first
 DQN_EPSILON_DECAY steps.
 
 Usage:
-    python scripts/train_dqn.py
+    python scripts/train/train_dqn.py
 """
+
+import sys
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from pathlib import Path
 from tqdm import tqdm
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from config import (
     set_seeds, SEED,
@@ -39,11 +43,10 @@ from config import (
     DQN_CHECKPOINT,
     CHECKPOINT_DIR,
 )
+from src.datasets.rdd2022 import COUNTRIES
 from src.models.efficientnet import load_checkpoint
 from src.models.dqn import QNetwork, ReplayBuffer
 from src.models.dqn_env import PatchInspectionEnv
-
-COUNTRIES = ["Japan", "India", "Czech", "Norway"]
 
 
 def collect_image_paths() -> list[Path]:
@@ -163,15 +166,23 @@ def main() -> None:
 
     state, _ = env.reset(seed=SEED)
     episode_reward = 0.0
-    best_episode_reward = float("-inf")
     episode_count = 0
-    episode_rewards: list[float] = []
+    # The agent's real job is "high recall for few patches inspected", so the
+    # checkpoint is chosen on a rolling mean of that trade-off, not on the
+    # noisy single-episode return.
+    recent_recall: list[float] = []
+    recent_patches: list[int] = []
+    best_gate_score = float("-inf")
+
+    def gate_score(recalls: list[float], patches: list[int]) -> float:
+        n = len(recalls)
+        return sum(recalls) / n - 0.02 * (sum(patches) / n)
 
     print(f"Training for {DQN_TRAIN_STEPS:,} steps ...")
     for step in tqdm(range(1, DQN_TRAIN_STEPS + 1)):
         epsilon = get_epsilon(step)
         action = agent.select_action(state, epsilon)
-        next_state, reward, terminated, truncated, _ = env.step(action)
+        next_state, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
 
         agent.buffer.push(state, action, reward, next_state, done)
@@ -184,25 +195,34 @@ def main() -> None:
             agent.update_target()
 
         if done:
-            episode_rewards.append(episode_reward)
             episode_count += 1
+            recent_recall.append(info["recall"])
+            recent_patches.append(info["patches_inspected"])
+            recent_recall = recent_recall[-100:]
+            recent_patches = recent_patches[-100:]
 
-            if episode_reward > best_episode_reward:
-                best_episode_reward = episode_reward
-                torch.save(agent.online_net.state_dict(), DQN_CHECKPOINT)
+            if len(recent_recall) == 100:
+                score = gate_score(recent_recall, recent_patches)
+                if score > best_gate_score:
+                    best_gate_score = score
+                    torch.save(agent.online_net.state_dict(), DQN_CHECKPOINT)
 
             if episode_count % 100 == 0:
-                recent = episode_rewards[-100:]
-                avg = sum(recent) / len(recent)
                 print(
                     f"  Step {step:>7,}  Episodes {episode_count:>5,}  "
-                    f"Avg reward (last 100): {avg:.3f}  Epsilon: {epsilon:.3f}"
+                    f"Recall(100): {sum(recent_recall) / len(recent_recall):.3f}  "
+                    f"Patches(100): {sum(recent_patches) / len(recent_patches):.1f}  "
+                    f"Epsilon: {epsilon:.3f}"
                 )
 
             state, _ = env.reset()
             episode_reward = 0.0
 
-    print(f"\nTraining complete. Best episode reward: {best_episode_reward:.3f}")
+    if not DQN_CHECKPOINT.exists():
+        # Short run that never completed 100 episodes: still leave a checkpoint.
+        torch.save(agent.online_net.state_dict(), DQN_CHECKPOINT)
+
+    print(f"\nTraining complete. Best gate score: {best_gate_score:.3f}")
     print(f"Checkpoint saved to {DQN_CHECKPOINT}")
 
 
