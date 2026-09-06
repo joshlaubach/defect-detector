@@ -132,9 +132,22 @@ class DQNAgent:
         self.target_net.load_state_dict(self.online_net.state_dict())
 
 
-def main() -> None:
+def run_training(
+    n_steps: int = DQN_TRAIN_STEPS,
+    device: torch.device | str | None = None,
+) -> dict:
+    """
+    Train the patch-selection gate for ``n_steps`` environment steps.
+
+    Shared by the headless script (``main``) and ``notebooks/training.ipynb`` so
+    the two cannot drift apart. Returns a history dict with the best rolling
+    gate score, the checkpoint path, and per-episode arrays (env step, defect
+    recall, patches inspected, epsilon) for plotting.
+    """
     set_seeds(SEED)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(device)
     print(f"Device: {device}")
 
     print("Loading frozen EfficientNet-B4 ...")
@@ -174,12 +187,18 @@ def main() -> None:
     recent_patches: list[int] = []
     best_gate_score = float("-inf")
 
+    # Per-episode history, returned for plotting the training curves.
+    episode_step: list[int] = []
+    episode_recall: list[float] = []
+    episode_patches: list[int] = []
+    episode_epsilon: list[float] = []
+
     def gate_score(recalls: list[float], patches: list[int]) -> float:
         n = len(recalls)
         return sum(recalls) / n - 0.02 * (sum(patches) / n)
 
-    print(f"Training for {DQN_TRAIN_STEPS:,} steps ...")
-    for step in tqdm(range(1, DQN_TRAIN_STEPS + 1)):
+    print(f"Training for {n_steps:,} steps ...")
+    for step in tqdm(range(1, n_steps + 1)):
         epsilon = get_epsilon(step)
         action = agent.select_action(state, epsilon)
         next_state, reward, terminated, truncated, info = env.step(action)
@@ -200,6 +219,11 @@ def main() -> None:
             recent_patches.append(info["patches_inspected"])
             recent_recall = recent_recall[-100:]
             recent_patches = recent_patches[-100:]
+
+            episode_step.append(step)
+            episode_recall.append(info["recall"])
+            episode_patches.append(info["patches_inspected"])
+            episode_epsilon.append(epsilon)
 
             if len(recent_recall) == 100:
                 score = gate_score(recent_recall, recent_patches)
@@ -224,6 +248,19 @@ def main() -> None:
 
     print(f"\nTraining complete. Best gate score: {best_gate_score:.3f}")
     print(f"Checkpoint saved to {DQN_CHECKPOINT}")
+
+    return {
+        "best_gate_score": best_gate_score,
+        "checkpoint_path": str(DQN_CHECKPOINT),
+        "episode_step": episode_step,
+        "episode_recall": episode_recall,
+        "episode_patches": episode_patches,
+        "episode_epsilon": episode_epsilon,
+    }
+
+
+def main() -> None:
+    run_training()
 
 
 if __name__ == "__main__":
