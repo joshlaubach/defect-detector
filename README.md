@@ -99,7 +99,7 @@ pip install kaggle && python data/download_mvtec.py   # ~5 GB, see Kaggle setup 
 
 # 2. EfficientNet-B4 on RDD2022 (notebook, top to bottom)
 #    -> checkpoints/efficientnet_rdd2022.pth
-jupyter notebook notebooks/train_efficientnet.ipynb
+jupyter notebook notebooks/training.ipynb
 
 # 3. EfficientNet-B4 on MVTec AD
 python scripts/train/train_mvtec.py         # -> checkpoints/efficientnet_mvtec.pth
@@ -185,7 +185,7 @@ defect-detector/
         download_rdd2022.py       resumable Figshare download
         download_mvtec.py         Kaggle download
     notebooks/
-        train_efficientnet.ipynb  EfficientNet-B4 fine-tuning on RDD2022
+        training.ipynb            EfficientNet-B4 + DQN gate, run top to bottom
     src/
         pipeline.py               DefectPipeline: the single stage chain
         datasets/
